@@ -1,0 +1,248 @@
+import ee
+from google.colab import auth
+import matplotlib.pyplot as plt  # Importing matplotlib
+
+auth.authenticate_user()
+project_id = '373698065154'
+ee.Initialize(project=project_id)
+
+# Define ROI
+roi = ee.Geometry.Rectangle([149.9828269053883, -33.46876970813959, 151.3312572146645, -32.352792959833536])
+
+# Load Landsat ImageCollection
+landsat = (ee.ImageCollection('LANDSAT/LC08/C02/T1_L2')
+            .filterBounds(roi)
+            .filterDate('2019-12-13', '2020-01-13'))
+
+# Cloud masking function
+def mask_landsat_clouds(image):
+    cloud_mask = image.select('QA_PIXEL').bitwiseAnd(1 << 5).eq(0)
+    return image.updateMask(cloud_mask).select(['SR_B4', 'SR_B3', 'SR_B2'])
+
+# Apply cloud masking
+masked_landsat = landsat.map(mask_landsat_clouds)
+
+# Load VIIRS ImageCollection
+viirs = (ee.ImageCollection('NOAA/VIIRS/DNB/MONTHLY_V1/VCMCFG')
+          .filterBounds(roi)
+          .filterDate('2019-12-13', '2020-01-13')
+          .select('avg_rad'))
+
+# Combine Landsat and VIIRS data
+combined_landsat = masked_landsat.median().select(['SR_B4', 'SR_B3', 'SR_B2'])
+combined_viirs = viirs.median().rename('avg_rad')
+combined = combined_landsat.addBands(combined_viirs)
+
+# Define expanded training points
+training_points = ee.FeatureCollection([
+    ee.Feature(ee.Geometry.Point([150.3877749112102, -32.684353575879946]), {'class': 0}),
+    ee.Feature(ee.Geometry.Point([150.7887758877727, -32.75367714264908]), {'class': 0}),
+    ee.Feature(ee.Geometry.Point([150.4921450283977, -33.02122044044614]), {'class': 0}),
+    ee.Feature(ee.Geometry.Point([150.3871, -32.6845]), {'class': 0}),
+    ee.Feature(ee.Geometry.Point([150.7898, -32.7548]), {'class': 0}),
+    ee.Feature(ee.Geometry.Point([150.4930, -33.0220]), {'class': 0}),
+    ee.Feature(ee.Geometry.Point([150.3880, -32.6850]), {'class': 0}),
+    ee.Feature(ee.Geometry.Point([150.7900, -32.7550]), {'class': 0}),
+    ee.Feature(ee.Geometry.Point([150.4940, -33.0230]), {'class': 0}),
+    
+    ee.Feature(ee.Geometry.Point([150.7877749112102, -32.684353575879946]), {'class': 1}),
+    ee.Feature(ee.Geometry.Point([151.1887758877727, -32.75367714264908]), {'class': 1}),
+    ee.Feature(ee.Geometry.Point([150.8921450283977, -33.02122044044614]), {'class': 1}),
+    ee.Feature(ee.Geometry.Point([150.7871, -32.6845]), {'class': 1}),
+    ee.Feature(ee.Geometry.Point([151.1898, -32.7548]), {'class': 1}),
+    ee.Feature(ee.Geometry.Point([150.8930, -33.0220]), {'class': 1}),
+    ee.Feature(ee.Geometry.Point([150.7880, -32.6850]), {'class': 1}),
+    ee.Feature(ee.Geometry.Point([151.1900, -32.7550]), {'class': 1}),
+    ee.Feature(ee.Geometry.Point([150.8940, -33.0230]), {'class': 1}),
+    
+    ee.Feature(ee.Geometry.Point([150.5877749112102, -32.684353575879946]), {'class': 2}),
+    ee.Feature(ee.Geometry.Point([150.9887758877727, -32.75367714264908]), {'class': 2}),
+    ee.Feature(ee.Geometry.Point([150.6921450283977, -33.02122044044614]), {'class': 2}),
+    ee.Feature(ee.Geometry.Point([150.5871, -32.6845]), {'class': 2}),
+    ee.Feature(ee.Geometry.Point([150.9898, -32.7548]), {'class': 2}),
+    ee.Feature(ee.Geometry.Point([150.6930, -33.0220]), {'class': 2}),
+    ee.Feature(ee.Geometry.Point([150.5880, -32.6850]), {'class': 2}),
+    ee.Feature(ee.Geometry.Point([150.9900, -32.7550]), {'class': 2}),
+    ee.Feature(ee.Geometry.Point([150.6940, -33.0230]), {'class': 2}),
+])
+
+# Sample training data with more points
+training_data = combined.sampleRegions(
+    collection=training_points,
+    properties=['class'],
+    scale=30)
+
+# Train SVM Classifier
+svm_classifier = ee.Classifier.libsvm().train(
+    features=training_data,
+    classProperty='class',
+    inputProperties=['SR_B4', 'SR_B3', 'SR_B2', 'avg_rad'])
+
+# Classify combined data with SVM classifier
+classified = combined.classify(svm_classifier)
+
+# Define test points
+test_points = ee.FeatureCollection([
+    ee.Feature(ee.Geometry.Point([150.3877749112102, -32.684353575879946]), {'class': 0}),
+    ee.Feature(ee.Geometry.Point([150.7887758877727, -32.75367714264908]), {'class': 0}),
+    ee.Feature(ee.Geometry.Point([150.4921450283977, -33.02122044044614]), {'class': 0}),
+    ee.Feature(ee.Geometry.Point([150.3871, -32.6845]), {'class': 0}),
+    ee.Feature(ee.Geometry.Point([150.7898, -32.7548]), {'class': 0}),
+    ee.Feature(ee.Geometry.Point([150.4930, -33.0220]), {'class': 0}),
+    
+    ee.Feature(ee.Geometry.Point([150.7877749112102, -32.684353575879946]), {'class': 1}),
+    ee.Feature(ee.Geometry.Point([151.1887758877727, -32.75367714264908]), {'class': 1}),
+    ee.Feature(ee.Geometry.Point([150.8921450283977, -33.02122044044614]), {'class': 1}),
+    ee.Feature(ee.Geometry.Point([150.7871, -32.6845]), {'class': 1}),
+    ee.Feature(ee.Geometry.Point([151.1898, -32.7548]), {'class': 1}),
+    ee.Feature(ee.Geometry.Point([150.8930, -33.0220]), {'class': 1}),
+    
+    ee.Feature(ee.Geometry.Point([150.5877749112102, -32.684353575879946]), {'class': 2}),
+    ee.Feature(ee.Geometry.Point([150.9887758877727, -32.75367714264908]), {'class': 2}),
+    ee.Feature(ee.Geometry.Point([150.6921450283977, -33.02122044044614]), {'class': 2}),
+    ee.Feature(ee.Geometry.Point([150.5871, -32.6845]), {'class': 2}),
+    ee.Feature(ee.Geometry.Point([150.9898, -32.7548]), {'class': 2}),
+    ee.Feature(ee.Geometry.Point([150.6930, -33.0220]), {'class': 2}),
+])
+
+# Sample test data
+test_data = combined.sampleRegions(
+    collection=test_points,
+    properties=['class'],
+    scale=30)
+
+# Classify test data
+predicted = test_data.classify(svm_classifier)
+
+# Confusion matrix and accuracy calculations
+confusion_data = predicted.map(lambda feature: feature.set('actual', feature.get('class')).set('predicted', feature.get('classification')))
+
+# Create confusion matrix
+classes = ee.List([0, 1, 2])  # Adjust based on the number of classes
+
+def create_confusion_matrix(actual):
+    counts = []
+    predicted_classes = classes.getInfo()
+    for predicted in predicted_classes:
+        count = confusion_data.filter(
+            ee.Filter.And(
+                ee.Filter.eq('actual', actual),
+                ee.Filter.eq('predicted', predicted)
+            )
+        ).size()
+        counts.append(count)
+    return ee.List(counts)
+
+
+# Map over classes to create the confusion matrix
+confusion_matrix = classes.map(create_confusion_matrix)
+
+# Convert to a 2D matrix
+confusion_matrix_2d = ee.List([
+    confusion_matrix.get(0),
+    confusion_matrix.get(1),
+    confusion_matrix.get(2)
+])
+
+# Print the confusion matrix
+print('Confusion Matrix:', confusion_matrix_2d.getInfo())
+
+# Convert the confusion matrix to a Python list
+confusion_matrix_2d_py = confusion_matrix_2d.getInfo()
+
+# Calculate overall accuracy
+total_count = confusion_data.size().getInfo()
+total_correct = (confusion_matrix_2d_py[0][0] +
+                confusion_matrix_2d_py[1][1] +
+                confusion_matrix_2d_py[2][2])
+
+overall_accuracy = total_correct / total_count
+print('Overall Accuracy:', overall_accuracy)
+
+# Kappa calculation
+total_predictions = (confusion_matrix_2d_py[0][0] + confusion_matrix_2d_py[0][1] +
+                    confusion_matrix_2d_py[1][0] + confusion_matrix_2d_py[1][1] +
+                    confusion_matrix_2d_py[2][0] + confusion_matrix_2d_py[2][1] +
+                    confusion_matrix_2d_py[2][2])
+
+expected_accuracy = total_correct / total_predictions
+kappa = (total_correct - expected_accuracy) / (total_count - expected_accuracy)
+print('Kappa Index:', kappa)
+
+# Function to compute Precision, Recall, and F1 Score
+def compute_metrics(confusion_matrix):
+    # Convert confusion matrix to a Python list
+    confusion_matrix_py = confusion_matrix.getInfo()
+    
+    # True Positives for class 1
+    tp = ee.Number(confusion_matrix_py[1][1])  
+    
+    # False Negatives
+    fn = ee.Number(confusion_matrix_py[0][1]).add(ee.Number(confusion_matrix_py[2][1]))  
+    
+    # False Positives
+    fp = ee.Number(confusion_matrix_py[1][0]).add(ee.Number(confusion_matrix_py[1][2]))  
+    
+    # Calculate Precision
+    precision = tp.divide(tp.add(fp)).getInfo() # Changed line: Get the value of the ee.Number object
+    if precision is None:
+        precision = 0 # Handle potential None values
+    
+    # Calculate Recall
+    recall = tp.divide(tp.add(fn)).getInfo() # Changed line: Get the value of the ee.Number object
+    if recall is None:
+        recall = 0 # Handle potential None values
+    
+    # Calculate F1 Score
+    f1_score = 2 * precision * recall / (precision + recall) if (precision + recall) != 0 else 0 # Changed line: Calculate F1 Score using Python operators
+    
+    return {'precision': precision, 'recall': recall, 'f1Score': f1_score}
+
+# Get metrics
+metrics = compute_metrics(confusion_matrix)
+print('Precision:', metrics['precision'])
+print('Recall:', metrics['recall'])
+print('F1 Score:', metrics['f1Score'])
+
+# Calculate TPR and FPR for ROC Curve
+thresholds = ee.List.sequence(0, 1, 0.1)
+
+# Calculate TPR and FPR server-side
+def calc_tpr_fpr(threshold):
+    threshold = ee.Number(threshold)
+    predicted_labels = test_data.map(lambda feature: feature.set(
+        'predicted', ee.Number(feature.get('classification')).gte(threshold)))
+    
+    tp = predicted_labels.filter(ee.Filter.And(
+        ee.Filter.eq('actual', 1),
+        ee.Filter.eq('predicted', 1))).size()
+    fp = predicted_labels.filter(ee.Filter.And(
+        ee.Filter.eq('actual', 0),
+        ee.Filter.eq('predicted', 1))).size()
+    fn = predicted_labels.filter(ee.Filter.And(
+        ee.Filter.eq('actual', 1),
+        ee.Filter.eq('predicted', 0))).size()
+    tn = predicted_labels.filter(ee.Filter.And(
+        ee.Filter.eq('actual', 0),
+        ee.Filter.eq('predicted', 0))).size()
+    
+    tpr = tp.divide(tp.add(fn))
+    fpr = fp.divide(fp.add(tn))
+    return ee.Feature(None, {'threshold': threshold, 'tpr': tpr, 'fpr': fpr})
+
+# Create ROC data
+roc_data = thresholds.map(calc_tpr_fpr)
+roc_data = ee.FeatureCollection(roc_data).getInfo()
+
+# Extract ROC data for plotting
+roc_values = [(f['properties']['tpr'], f['properties']['fpr']) for f in roc_data['features']]
+tpr_values, fpr_values = zip(*roc_values)
+
+# Plot the ROC Curve
+plt.figure(figsize=(10, 6))
+plt.plot(fpr_values, tpr_values, marker='o')
+plt.plot([0, 1], [0, 1], 'k--')  # Diagonal line
+plt.xlabel('False Positive Rate')
+plt.ylabel('True Positive Rate')
+plt.title('ROC Curve')
+plt.show()
