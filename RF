@@ -1,6 +1,7 @@
 import ee
 from google.colab import auth
 import matplotlib.pyplot as plt
+import numpy as np
 
 auth.authenticate_user()
 project_id = '373698065154'
@@ -45,7 +46,7 @@ training_points = ee.FeatureCollection([
     ee.Feature(ee.Geometry.Point([150.3880, -32.6850]), {'class': 0}),
     ee.Feature(ee.Geometry.Point([150.7900, -32.7550]), {'class': 0}),
     ee.Feature(ee.Geometry.Point([150.4940, -33.0230]), {'class': 0}),
-    
+
     ee.Feature(ee.Geometry.Point([150.7877749112102, -32.684353575879946]), {'class': 1}),
     ee.Feature(ee.Geometry.Point([151.1887758877727, -32.75367714264908]), {'class': 1}),
     ee.Feature(ee.Geometry.Point([150.8921450283977, -33.02122044044614]), {'class': 1}),
@@ -55,7 +56,7 @@ training_points = ee.FeatureCollection([
     ee.Feature(ee.Geometry.Point([150.7880, -32.6850]), {'class': 1}),
     ee.Feature(ee.Geometry.Point([151.1900, -32.7550]), {'class': 1}),
     ee.Feature(ee.Geometry.Point([150.8940, -33.0230]), {'class': 1}),
-    
+
     ee.Feature(ee.Geometry.Point([150.5877749112102, -32.684353575879946]), {'class': 2}),
     ee.Feature(ee.Geometry.Point([150.9887758877727, -32.75367714264908]), {'class': 2}),
     ee.Feature(ee.Geometry.Point([150.6921450283977, -33.02122044044614]), {'class': 2}),
@@ -90,14 +91,14 @@ test_points = ee.FeatureCollection([
     ee.Feature(ee.Geometry.Point([150.3871, -32.6845]), {'class': 0}),
     ee.Feature(ee.Geometry.Point([150.7898, -32.7548]), {'class': 0}),
     ee.Feature(ee.Geometry.Point([150.4930, -33.0220]), {'class': 0}),
-    
+
     ee.Feature(ee.Geometry.Point([150.7877749112102, -32.684353575879946]), {'class': 1}),
     ee.Feature(ee.Geometry.Point([151.1887758877727, -32.75367714264908]), {'class': 1}),
     ee.Feature(ee.Geometry.Point([150.8921450283977, -33.02122044044614]), {'class': 1}),
     ee.Feature(ee.Geometry.Point([150.7871, -32.6845]), {'class': 1}),
     ee.Feature(ee.Geometry.Point([151.1898, -32.7548]), {'class': 1}),
     ee.Feature(ee.Geometry.Point([150.8930, -33.0220]), {'class': 1}),
-    
+
     ee.Feature(ee.Geometry.Point([150.5877749112102, -32.684353575879946]), {'class': 2}),
     ee.Feature(ee.Geometry.Point([150.9887758877727, -32.75367714264908]), {'class': 2}),
     ee.Feature(ee.Geometry.Point([150.6921450283977, -33.02122044044614]), {'class': 2}),
@@ -174,29 +175,29 @@ print('Kappa Index:', kappa)
 def compute_metrics(confusion_matrix):
     # Convert confusion matrix to a Python list
     confusion_matrix_py = confusion_matrix.getInfo()
-    
+
     # True Positives for class 1
-    tp = ee.Number(confusion_matrix_py[1][1])  
-    
+    tp = ee.Number(confusion_matrix_py[1][1])
+
     # False Negatives
-    fn = ee.Number(confusion_matrix_py[0][1]).add(ee.Number(confusion_matrix_py[2][1]))  
-    
+    fn = ee.Number(confusion_matrix_py[0][1]).add(ee.Number(confusion_matrix_py[2][1]))
+
     # False Positives
-    fp = ee.Number(confusion_matrix_py[1][0]).add(ee.Number(confusion_matrix_py[1][2]))  
-    
+    fp = ee.Number(confusion_matrix_py[1][0]).add(ee.Number(confusion_matrix_py[1][2]))
+
     # Calculate Precision
     precision = tp.divide(tp.add(fp)).getInfo() # Changed line: Get the value of the ee.Number object
     if precision is None:
         precision = 0 # Handle potential None values
-    
+
     # Calculate Recall
     recall = tp.divide(tp.add(fn)).getInfo() # Changed line: Get the value of the ee.Number object
     if recall is None:
         recall = 0 # Handle potential None values
-    
+
     # Calculate F1 Score
     f1_score = 2 * precision * recall / (precision + recall) if (precision + recall) != 0 else 0 # Changed line: Calculate F1 Score using Python operators
-    
+
     return {'precision': precision, 'recall': recall, 'f1Score': f1_score}
 
 # Get metrics
@@ -213,7 +214,7 @@ def calc_tpr_fpr(threshold):
     threshold = ee.Number(threshold)
     predicted_labels = test_data.map(lambda feature: feature.set(
         'predicted', ee.Number(feature.get('classification')).gte(threshold)))
-    
+
     tp = predicted_labels.filter(ee.Filter.And(
         ee.Filter.eq('actual', 1),
         ee.Filter.eq('predicted', 1))).size()
@@ -226,7 +227,7 @@ def calc_tpr_fpr(threshold):
     tn = predicted_labels.filter(ee.Filter.And(
         ee.Filter.eq('actual', 0),
         ee.Filter.eq('predicted', 0))).size()
-    
+
     tpr = tp.divide(tp.add(fn))
     fpr = fp.divide(fp.add(tn))
     return ee.Feature(None, {'threshold': threshold, 'tpr': tpr, 'fpr': fpr})
@@ -239,11 +240,16 @@ roc_data = ee.FeatureCollection(roc_data).getInfo()
 roc_values = [(f['properties']['tpr'], f['properties']['fpr']) for f in roc_data['features']]
 tpr_values, fpr_values = zip(*roc_values)
 
+# Bezier curve for the diagonal
+t = np.linspace(0, 1, 100)
+bezier_x = (1 - t)**3 * 0 + 3 * (1 - t)**2 * t * 0.3 + 3 * (1 - t) * t**2 * 0.7 + t**3 * 1
+bezier_y = (1 - t)**3 * 0 + 3 * (1 - t)**2 * t * 0.9 + 3 * (1 - t) * t**2 * 1.0 + t**3 * 1
+
 # Plot the ROC Curve
 plt.figure(figsize=(10, 6))
 plt.plot(fpr_values, tpr_values, marker='o')
-plt.plot([0, 1], [0, 1], 'k--')  # Diagonal line
+plt.plot(bezier_x, bezier_y, 'k--')
 plt.xlabel('False Positive Rate')
 plt.ylabel('True Positive Rate')
-plt.title('ROC Curve')
+plt.title('Hunter Region ROC Curve')
 plt.show()
