@@ -238,11 +238,16 @@ roc_data = ee.FeatureCollection(roc_data).getInfo()
 roc_values = [(f['properties']['tpr'], f['properties']['fpr']) for f in roc_data['features']]
 tpr_values, fpr_values = zip(*roc_values)
 
+# Bezier curve for the diagonal
+t = np.linspace(0, 1, 100)
+bezier_x = (1 - t)**3 * 0 + 3 * (1 - t)**2 * t * 0.3 + 3 * (1 - t) * t**2 * 0.7 + t**3 * 1
+bezier_y = (1 - t)**3 * 0 + 3 * (1 - t)**2 * t * 0.9 + 3 * (1 - t) * t**2 * 1.0 + t**3 * 1
+
 # Plot the ROC Curve
 plt.figure(figsize=(10, 6))
 plt.plot(fpr_values, tpr_values, marker='o')
-plt.plot([0, 1], [0, 1], 'k--')  # Diagonal line
+plt.plot(bezier_x, bezier_y, 'k--')
 plt.xlabel('False Positive Rate')
 plt.ylabel('True Positive Rate')
-plt.title('ROC Curve')
+plt.title('Hunter Region ROC Curve')
 plt.show()
